@@ -24,7 +24,7 @@ package main
 
 import (
 	"github.com/noble-gase/argon"
-	"github.com/noble-gase/argon/dingtalk"
+	"github.com/noble-gase/argon/channel/dingtalk"
 	"github.com/noble-gase/argon/llmchat"
 	"github.com/noble-gase/argon/model/openai"
 )
@@ -53,7 +53,7 @@ func main() {
 	}
 
 	// llmchat
-	chat, err := ar.NewLLMChat("IOTA-Agent", db, redis, agent)
+	chat, err := argon.NewLLMChat("IOTA-Agent", db, redis, agent)
 	if err != nil {
 		panic(err)
 	}
@@ -64,7 +64,7 @@ func main() {
 		ClientSecret: "clientSecret",
 		CardTemplateId: "xxxxxx.schema",
 	}
-	assistant, err := ar.NewAssistant(cfg, redis, chat)
+	assistant, err := argon.NewDingTalkAssistant(cfg, redis, chat)
 	if err != nil {
 		panic(err)
 	}
@@ -86,7 +86,7 @@ package main
 
 import (
 	"github.com/noble-gase/argon"
-	"github.com/noble-gase/argon/dingtalk"
+	"github.com/noble-gase/argon/channel/dingtalk"
 	"github.com/noble-gase/argon/llmchat"
 	"github.com/noble-gase/argon/model/openai"
 )
@@ -124,7 +124,7 @@ func main() {
 	}
 
 	// llmchat
-	chat, err := ar.NewLLMChat("IOTA-Agent", db, redis, agent)
+	chat, err := argon.NewLLMChat("IOTA-Agent", db, redis, agent)
 	if err != nil {
 		panic(err)
 	}
@@ -135,7 +135,7 @@ func main() {
 		ClientSecret: "clientSecret",
 		CardTemplateId: "xxxxxx.schema",
 	}
-	assistant, err := ar.NewAssistant(cfg, redis, chat)
+	assistant, err := argon.NewDingTalkAssistant(cfg, redis, chat)
 	if err != nil {
 		panic(err)
 	}

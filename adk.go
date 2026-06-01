@@ -1,7 +1,7 @@
-package ar
+package argon
 
 import (
-	"github.com/noble-gase/argon/dingtalk"
+	"github.com/noble-gase/argon/channel/dingtalk"
 	"github.com/noble-gase/argon/llmchat"
 	"github.com/noble-gase/argon/session"
 	"github.com/redis/go-redis/v9"
@@ -36,25 +36,25 @@ func NewLLMChat(name string, db gorm.Dialector, uc redis.UniversalClient, ab llm
 	return chat, nil
 }
 
-type Assistant struct {
+type DingTalkAssistant struct {
 	bot *dingtalk.Bot
 }
 
-func (a *Assistant) Start() {
-	a.bot.Start()
+func (dta *DingTalkAssistant) Start() {
+	dta.bot.Start()
 }
 
-func (a *Assistant) Stop() {
-	a.bot.Stop()
+func (dta *DingTalkAssistant) Stop() {
+	dta.bot.Stop()
 }
 
-// NewAssistant returns a DingTalk assistant.
-func NewAssistant(cfg *dingtalk.Config, uc redis.UniversalClient, chat *llmchat.Chat) (*Assistant, error) {
+// NewDingTalkAssistant returns a DingTalk assistant.
+func NewDingTalkAssistant(cfg *dingtalk.Config, uc redis.UniversalClient, chat *llmchat.Chat) (*DingTalkAssistant, error) {
 	card, err := dingtalk.NewCardSender(cfg, uc)
 	if err != nil {
 		return nil, err
 	}
 
 	bot := dingtalk.NewBot(cfg, chat, card)
-	return &Assistant{bot: bot}, nil
+	return &DingTalkAssistant{bot: bot}, nil
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/alibabacloud-go/tea/tea"
 	"github.com/google/uuid"
 	"github.com/noble-gase/neon/helper"
+	"github.com/noble-gase/neon/httpkit"
 	"github.com/noble-gase/neon/redlock"
 	"github.com/redis/go-redis/v9"
 	"github.com/tidwall/gjson"
@@ -175,7 +176,7 @@ func (s *CardSender) refreshAccessToken(ctx context.Context) {
 		}
 	}
 
-	resp, err := helper.RestyClient.R().
+	resp, err := httpkit.Client().R().
 		SetContext(ctx).
 		SetBody(helper.X{
 			"appKey":    s.clientId,

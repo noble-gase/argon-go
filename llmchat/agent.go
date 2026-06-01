@@ -2,7 +2,7 @@ package llmchat
 
 import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/noble-gase/neon/helper"
+	"github.com/noble-gase/neon/httpkit"
 	"google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
 	"google.golang.org/adk/model"
@@ -77,7 +77,7 @@ func (n *NormalAgent) Build(rootModel model.LLM) (agent.Agent, error) {
 	for _, endpoint := range n.Endpoints {
 		transport := &mcp.StreamableClientTransport{
 			Endpoint:   endpoint,
-			HTTPClient: helper.NewHttpClient(),
+			HTTPClient: httpkit.NewHttpClient(),
 		}
 		toolset, err := mcptoolset.New(mcptoolset.Config{
 			Transport: transport,
@@ -212,7 +212,7 @@ func (m *MCPAgent) Build(rootModel model.LLM) (agent.Agent, error) {
 	for _, endpoint := range m.Endpoints {
 		transport := &mcp.StreamableClientTransport{
 			Endpoint:   endpoint,
-			HTTPClient: helper.NewHttpClient(),
+			HTTPClient: httpkit.NewHttpClient(),
 		}
 		toolset, err := mcptoolset.New(mcptoolset.Config{
 			Transport: transport,

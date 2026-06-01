@@ -11,6 +11,7 @@ import (
 
 	"github.com/noble-gase/argon/llmchat"
 	"github.com/noble-gase/neon/helper"
+	"github.com/noble-gase/neon/httpkit"
 	"github.com/open-dingtalk/dingtalk-stream-sdk-go/chatbot"
 	"github.com/open-dingtalk/dingtalk-stream-sdk-go/client"
 	"google.golang.org/adk/session"
@@ -111,7 +112,7 @@ func (b *Bot) reply(ctx context.Context, webhook, text string) error {
 			"text":  text,
 		},
 	}
-	resp, err := helper.RestyClient.R().
+	resp, err := httpkit.Client().R().
 		SetContext(ctx).
 		SetHeader("Accept", "application/json").
 		SetHeader("Content-Type", "application/json").

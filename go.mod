@@ -10,7 +10,7 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.46.0
 	github.com/google/uuid v1.6.0
 	github.com/modelcontextprotocol/go-sdk v1.6.1
-	github.com/noble-gase/neon v0.1.0
+	github.com/noble-gase/neon v0.2.0
 	github.com/open-dingtalk/dingtalk-stream-sdk-go v0.9.1
 	github.com/openai/openai-go/v3 v3.37.0
 	github.com/redis/go-redis/v9 v9.20.0

@@ -44,9 +44,9 @@ func main() {
 - 遇到工具不能处理的问题，请如实告知，并让用户找「xxx」确认`,
 		LLMAdapter: &llmchat.OpenAI{
 			Config: openai.Config{
-				APIKey: "sk-xxxxxx",
-				BaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-				ModelName: "glm-5",
+				APIKey: "sk-xxxxxxxxx",
+				BaseURL: "https://api.deepseek.com",
+				ModelName: "deepseek-v4-flash",
 			},
 		},
 		Endpoints: []string{"http://localhost:8080/mcp/iotlink"},
@@ -102,9 +102,9 @@ func main() {
 - 结果必须全部显示，不要省略字段，更不要使用 ... 省略内容`,
 		LLMAdapter: &llmchat.OpenAI{
 			Config: openai.Config{
-				APIKey: "sk-xxxxxx",
-				BaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-				ModelName: "glm-5",
+				APIKey: "sk-xxxxxxxxx",
+				BaseURL: "https://api.deepseek.com",
+				ModelName: "deepseek-v4-flash",
 			},
 		},
 		Tools: []llmchat.AgentBuilder{

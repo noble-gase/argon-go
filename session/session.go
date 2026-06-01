@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/noble-gase/ne/helper"
-	"github.com/noble-gase/ne/redkit"
+	"github.com/noble-gase/neon/helper"
+	"github.com/noble-gase/neon/redkit"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/adk/session"
 	"google.golang.org/adk/session/database"

@@ -3,8 +3,8 @@ package llmchat
 import (
 	"context"
 
-	"github.com/noble-gase/ar/model/anthropic"
-	"github.com/noble-gase/ar/model/openai"
+	"github.com/noble-gase/argon/model/anthropic"
+	"github.com/noble-gase/argon/model/openai"
 	"google.golang.org/adk/model"
 	"google.golang.org/adk/model/gemini"
 	"google.golang.org/genai"

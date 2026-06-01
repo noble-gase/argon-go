@@ -1,9 +1,9 @@
 package ar
 
 import (
-	"github.com/noble-gase/ar/dingtalk"
-	"github.com/noble-gase/ar/llmchat"
-	"github.com/noble-gase/ar/session"
+	"github.com/noble-gase/argon/dingtalk"
+	"github.com/noble-gase/argon/llmchat"
+	"github.com/noble-gase/argon/session"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/adk/agent"
 	"gorm.io/gorm"

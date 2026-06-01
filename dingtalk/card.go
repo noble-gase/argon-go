@@ -13,8 +13,8 @@ import (
 	util "github.com/alibabacloud-go/tea-utils/v2/service"
 	"github.com/alibabacloud-go/tea/tea"
 	"github.com/google/uuid"
-	"github.com/noble-gase/ne/helper"
-	"github.com/noble-gase/ne/redlock"
+	"github.com/noble-gase/neon/helper"
+	"github.com/noble-gase/neon/redlock"
 	"github.com/redis/go-redis/v9"
 	"github.com/tidwall/gjson"
 )

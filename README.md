@@ -1,11 +1,11 @@
-# 氩-Ar
+# argon-go
 
-[氩-Ar] AI 智能助手开发库｜Assistant Development Kit (ADK) for Go
+[氩-Argon] AI 智能助手开发库｜Assistant Development Kit (ADK) for Go
 
 ## Install
 
 ```shell
-go get github.com/noble-gase/ar
+go get github.com/noble-gase/argon
 ```
 
 ## Usage
@@ -19,10 +19,10 @@ go get github.com/noble-gase/ar
 package main
 
 import (
-	"github.com/noble-gase/ar"
-	"github.com/noble-gase/ar/dingtalk"
-	"github.com/noble-gase/ar/llmchat"
-	"github.com/noble-gase/ar/model/openai"
+	"github.com/noble-gase/argon"
+	"github.com/noble-gase/argon/dingtalk"
+	"github.com/noble-gase/argon/llmchat"
+	"github.com/noble-gase/argon/model/openai"
 )
 
 func main() {
@@ -81,10 +81,10 @@ func main() {
 package main
 
 import (
-	"github.com/noble-gase/ar"
-	"github.com/noble-gase/ar/dingtalk"
-	"github.com/noble-gase/ar/llmchat"
-	"github.com/noble-gase/ar/model/openai"
+	"github.com/noble-gase/argon"
+	"github.com/noble-gase/argon/dingtalk"
+	"github.com/noble-gase/argon/llmchat"
+	"github.com/noble-gase/argon/model/openai"
 )
 
 func main() {

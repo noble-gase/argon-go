@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/noble-gase/ar/llmchat"
-	"github.com/noble-gase/ne/helper"
+	"github.com/noble-gase/argon/llmchat"
+	"github.com/noble-gase/neon/helper"
 	"github.com/open-dingtalk/dingtalk-stream-sdk-go/chatbot"
 	"github.com/open-dingtalk/dingtalk-stream-sdk-go/client"
 	"google.golang.org/adk/session"

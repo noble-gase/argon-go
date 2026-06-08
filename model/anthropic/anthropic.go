@@ -254,6 +254,42 @@ func (m *anthropicModel) buildMessageParams(req *model.LLMRequest) (anthropic.Me
 			}
 			params.Tools = tools
 		}
+
+		// ToolConfig → tool_choice
+		//
+		// Maps genai.FunctionCallingConfig.Mode to Anthropic's tool_choice:
+		//   ModeAuto → {type: "auto"} (default behaviour; model may or may not call a tool)
+		//   ModeAny  → {type: "any"}  (model MUST call a tool; use for agentic loops
+		//                              that can't handle a plain-text reply)
+		//   ModeNone → {type: "none"} (tools disabled for this call even if provided)
+		//
+		// When AllowedFunctionNames holds exactly one name with ModeAny, Anthropic's
+		// equivalent is {type: "tool", name: "..."}. For multiple names we fall back
+		// to {type: "any"} because Anthropic's tool variant accepts a single name,
+		// not a list — same pragmatic choice as the OpenAI adapter. Callers who need
+		// a multi-function allowlist should rely on ModeAny plus prompt-level
+		// instructions to pick within the allowed set.
+		if req.Config.ToolConfig != nil && req.Config.ToolConfig.FunctionCallingConfig != nil {
+			fcc := req.Config.ToolConfig.FunctionCallingConfig
+			switch fcc.Mode {
+			case genai.FunctionCallingConfigModeAuto:
+				params.ToolChoice = anthropic.ToolChoiceUnionParam{
+					OfAuto: &anthropic.ToolChoiceAutoParam{},
+				}
+			case genai.FunctionCallingConfigModeNone:
+				params.ToolChoice = anthropic.ToolChoiceUnionParam{
+					OfNone: &anthropic.ToolChoiceNoneParam{},
+				}
+			case genai.FunctionCallingConfigModeAny:
+				if len(fcc.AllowedFunctionNames) == 1 {
+					params.ToolChoice = anthropic.ToolChoiceParamOfTool(fcc.AllowedFunctionNames[0])
+				} else {
+					params.ToolChoice = anthropic.ToolChoiceUnionParam{
+						OfAny: &anthropic.ToolChoiceAnyParam{},
+					}
+				}
+			}
+		}
 	}
 
 	return params, nil
@@ -281,7 +317,7 @@ func (m *anthropicModel) convertContentToMessage(content *genai.Content) (*anthr
 		if part.FunctionCall != nil {
 			blocks = append(blocks, anthropic.ContentBlockParamUnion{
 				OfToolUse: &anthropic.ToolUseBlockParam{
-					ID:    sanitizeToolID(part.FunctionCall.ID),
+					ID:    sanitizeToolId(part.FunctionCall.ID),
 					Name:  part.FunctionCall.Name,
 					Input: convertToolInputToRaw(part.FunctionCall.Args),
 				},
@@ -293,7 +329,7 @@ func (m *anthropicModel) convertContentToMessage(content *genai.Content) (*anthr
 			if err != nil {
 				return nil, fmt.Errorf("failed to marshal function response: %w", err)
 			}
-			blocks = append(blocks, anthropic.NewToolResultBlock(sanitizeToolID(part.FunctionResponse.ID), string(responseJSON), false))
+			blocks = append(blocks, anthropic.NewToolResultBlock(sanitizeToolId(part.FunctionResponse.ID), string(responseJSON), false))
 		}
 	}
 
@@ -374,21 +410,22 @@ func (m *anthropicModel) convertTools(genaiTools []*genai.Tool) ([]anthropic.Too
 				} else {
 					jsonBytes, err := json.Marshal(params)
 					if err == nil {
-						json.Unmarshal(jsonBytes, &m) //nolint:errcheck
+						_ = json.Unmarshal(jsonBytes, &m) //nolint:errcheck
 					}
 				}
 				if m != nil {
+					lowercaseTypes(m)
 					if props, ok := m["properties"]; ok {
 						inputSchema.Properties = props
 					}
-					// After json.Unmarshal, string arrays always arrive as []interface{},
-					// never []string, regardless of the source type. We handle both to be
-					// defensive: []string covers maps built directly in Go without a JSON
-					// round-trip; []interface{} covers the normal unmarshal path.
+					// After json.Unmarshal, string arrays always arrive as [], never []string,
+					// regardless of the source type. We handle both to be defensive:
+					// []string covers maps built directly in Go without a JSON round-trip;
+					// []any covers the normal unmarshal path.
 					switch req := m["required"].(type) {
 					case []string:
 						inputSchema.Required = req
-					case []interface{}:
+					case []any:
 						strs := make([]string, len(req))
 						for i, v := range req {
 							strs[i] = fmt.Sprint(v)
@@ -504,8 +541,8 @@ func extractTextFromContent(content *genai.Content) string {
 	return strings.Join(texts, "\n")
 }
 
-// sanitizeToolID replaces invalid tool IDs (chars outside [a-zA-Z0-9_-]) with a SHA256-based valid ID.
-func sanitizeToolID(id string) string {
+// sanitizeToolId replaces invalid tool IDs (chars outside [a-zA-Z0-9_-]) with a SHA256-based valid ID.
+func sanitizeToolId(id string) string {
 	if anthropicToolIdPattern.MatchString(id) {
 		return id
 	}
@@ -528,21 +565,21 @@ func repairMessageHistory(messages []anthropic.MessageParam) []anthropic.Message
 
 		// Check if this assistant message has tool_use blocks
 		if msg.Role == anthropic.MessageParamRoleAssistant {
-			toolUseIDs := extractToolUseIDs(msg)
+			toolUseIds := extractToolUseIds(msg)
 
-			if len(toolUseIDs) > 0 {
+			if len(toolUseIds) > 0 {
 				// Check if next message is a user message with matching tool_results
 				if i+1 < len(messages) && messages[i+1].Role == anthropic.MessageParamRoleUser {
-					toolResultIDs := extractToolResultIDs(messages[i+1])
+					toolResultIds := extractToolResultIds(messages[i+1])
 
 					// Find which tool_use IDs have matching tool_results
-					matchedIDs := make(map[string]bool)
-					for _, id := range toolResultIDs {
-						matchedIDs[id] = true
+					matchedIds := make(map[string]bool)
+					for _, id := range toolResultIds {
+						matchedIds[id] = true
 					}
 
 					// Filter out unmatched tool_use blocks from this message
-					filteredMsg := filterToolUse(msg, matchedIDs)
+					filteredMsg := filterToolUse(msg, matchedIds)
 					if hasContent(filteredMsg) {
 						result = append(result, filteredMsg)
 					}
@@ -564,8 +601,8 @@ func repairMessageHistory(messages []anthropic.MessageParam) []anthropic.Message
 	return result
 }
 
-// extractToolUseIDs returns all tool_use IDs from an assistant message.
-func extractToolUseIDs(msg anthropic.MessageParam) []string {
+// extractToolUseIds returns all tool_use IDs from an assistant message.
+func extractToolUseIds(msg anthropic.MessageParam) []string {
 	var ids []string
 	for _, block := range msg.Content {
 		if block.OfToolUse != nil {
@@ -575,8 +612,8 @@ func extractToolUseIDs(msg anthropic.MessageParam) []string {
 	return ids
 }
 
-// extractToolResultIDs returns all tool_result IDs from a user message.
-func extractToolResultIDs(msg anthropic.MessageParam) []string {
+// extractToolResultIds returns all tool_result IDs from a user message.
+func extractToolResultIds(msg anthropic.MessageParam) []string {
 	var ids []string
 	for _, block := range msg.Content {
 		if block.OfToolResult != nil {
@@ -586,12 +623,12 @@ func extractToolResultIDs(msg anthropic.MessageParam) []string {
 	return ids
 }
 
-// filterToolUse keeps tool_use blocks whose IDs are in allowedIDs. If allowedIDs is nil, removes all tool_use.
-func filterToolUse(msg anthropic.MessageParam, allowedIDs map[string]bool) anthropic.MessageParam {
+// filterToolUse keeps tool_use blocks whose IDs are in allowedIds. If allowedIds is nil, removes all tool_use.
+func filterToolUse(msg anthropic.MessageParam, allowedIds map[string]bool) anthropic.MessageParam {
 	var filteredBlocks []anthropic.ContentBlockParamUnion
 	for _, block := range msg.Content {
 		if block.OfToolUse != nil {
-			if allowedIDs != nil && allowedIDs[block.OfToolUse.ID] {
+			if allowedIds != nil && allowedIds[block.OfToolUse.ID] {
 				filteredBlocks = append(filteredBlocks, block)
 			}
 			continue
@@ -657,4 +694,24 @@ func convertInlineDataToBlock(data *genai.Blob) (*anthropic.ContentBlockParamUni
 // hasContent returns true if the message has at least one content block.
 func hasContent(msg anthropic.MessageParam) bool {
 	return len(msg.Content) > 0
+}
+
+// lowercaseTypes recursively traverses a JSON schema map and lowercases all "type" fields
+// to comply with Anthropic's JSON schema validation.
+func lowercaseTypes(m map[string]any) {
+	for k, v := range m {
+		if k == "type" {
+			if s, ok := v.(string); ok {
+				m[k] = strings.ToLower(s)
+			}
+		} else if vMap, ok := v.(map[string]any); ok {
+			lowercaseTypes(vMap)
+		} else if vList, ok := v.([]any); ok {
+			for _, item := range vList {
+				if itemMap, ok := item.(map[string]any); ok {
+					lowercaseTypes(itemMap)
+				}
+			}
+		}
+	}
 }

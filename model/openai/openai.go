@@ -137,18 +137,45 @@ func (m *openaiModel) generateStream(ctx context.Context, req *model.LLMRequest)
 			chunk := stream.Current()
 			acc.AddChunk(chunk)
 
-			if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
-				llmResp := &model.LLMResponse{
-					Content: &genai.Content{
-						Role:  genai.RoleModel,
-						Parts: []*genai.Part{{Text: chunk.Choices[0].Delta.Content}},
-					},
-					Partial:      true,
-					TurnComplete: false,
-				}
-				if !yield(llmResp, nil) {
-					return
-				}
+			if len(chunk.Choices) == 0 {
+				continue
+			}
+
+			delta := chunk.Choices[0].Delta
+			// reasoning_content is a non-standard field used by OpenAI-compatible
+			// providers (Kimi K2.6, DeepSeek-R1, Qwen3-Thinking, etc.) to stream
+			// hidden chain-of-thought tokens. The official OpenAI schema does not
+			// include it, so it is read from the raw JSON envelope rather than a
+			// typed field on Delta. See extractReasoningContent for details.
+			reasoning := extractReasoningContent(delta.RawJSON())
+
+			if delta.Content == "" && reasoning == "" {
+				continue
+			}
+
+			// Order is significant: reasoning tokens are emitted before the
+			// final answer tokens, so the Part order mirrors the temporal
+			// order in which the model produced them. Downstream consumers
+			// (e.g. ADK's llmagent) iterate parts and filter on Thought, so
+			// having reasoning first matches the natural transcript order.
+			var parts []*genai.Part
+			if reasoning != "" {
+				parts = append(parts, &genai.Part{Text: reasoning, Thought: true})
+			}
+			if delta.Content != "" {
+				parts = append(parts, &genai.Part{Text: delta.Content})
+			}
+
+			llmResp := &model.LLMResponse{
+				Content: &genai.Content{
+					Role:  genai.RoleModel,
+					Parts: parts,
+				},
+				Partial:      true,
+				TurnComplete: false,
+			}
+			if !yield(llmResp, nil) {
+				return
 			}
 		}
 
@@ -171,6 +198,14 @@ func (m *openaiModel) buildStreamFinalResponse(acc *openai.ChatCompletionAccumul
 
 	if len(acc.Choices) > 0 {
 		choice := acc.Choices[0]
+
+		// Same rationale as in generateStream: read reasoning_content from the
+		// raw JSON since openai-go does not type the non-standard field.
+		// Reasoning Part goes before the final-answer Part to preserve the
+		// temporal order in which the model produced the tokens.
+		if reasoning := extractReasoningContent(choice.Message.RawJSON()); reasoning != "" {
+			content.Parts = append(content.Parts, &genai.Part{Text: reasoning, Thought: true})
+		}
 
 		if choice.Message.Content != "" {
 			content.Parts = append(content.Parts, &genai.Part{Text: choice.Message.Content})
@@ -296,6 +331,45 @@ func (m *openaiModel) applyGenerationConfig(params *openai.ChatCompletionNewPara
 			params.Tools = tools
 		}
 	}
+
+	// ToolConfig → tool_choice
+	//
+	// Maps genai.FunctionCallingConfig.Mode to OpenAI's tool_choice:
+	//   ModeAuto → "auto"   (default behaviour; model may or may not call a tool)
+	//   ModeAny  → "required" (model MUST call a tool; use for agentic loops
+	//                         that can't handle a plain-text reply)
+	//   ModeNone → "none"   (tools disabled for this call even if provided)
+	//
+	// When AllowedFunctionNames is set with ModeAny, OpenAI's equivalent is a
+	// named function choice — we pick the first name since OpenAI's
+	// tool_choice accepts only one specific function, not a list. Callers who
+	// need a multi-function allowlist should rely on ModeAny plus prompt-level
+	// instructions to pick within the allowed set.
+	if cfg.ToolConfig != nil && cfg.ToolConfig.FunctionCallingConfig != nil {
+		fcc := cfg.ToolConfig.FunctionCallingConfig
+		switch fcc.Mode {
+		case genai.FunctionCallingConfigModeAuto:
+			params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{
+				OfAuto: openai.String("auto"),
+			}
+		case genai.FunctionCallingConfigModeNone:
+			params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{
+				OfAuto: openai.String("none"),
+			}
+		case genai.FunctionCallingConfigModeAny:
+			if len(fcc.AllowedFunctionNames) == 1 {
+				params.ToolChoice = openai.ToolChoiceOptionFunctionToolChoice(
+					openai.ChatCompletionNamedToolChoiceFunctionParam{
+						Name: fcc.AllowedFunctionNames[0],
+					},
+				)
+			} else {
+				params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{
+					OfAuto: openai.String("required"),
+				}
+			}
+		}
+	}
 }
 
 // convertContentToMessages converts a genai.Content into OpenAI message format.
@@ -314,17 +388,17 @@ func (m *openaiModel) convertContentToMessages(content *genai.Content) ([]openai
 			if err != nil {
 				return nil, fmt.Errorf("failed to marshal function response: %w", err)
 			}
-			normalizedID := m.normalizeToolCallID(part.FunctionResponse.ID)
-			messages = append(messages, openai.ToolMessage(string(responseJSON), normalizedID))
+			normalizedId := m.normalizeToolCallId(part.FunctionResponse.ID)
+			messages = append(messages, openai.ToolMessage(string(responseJSON), normalizedId))
 		case part.FunctionCall != nil:
 			argsJSON, err := json.Marshal(part.FunctionCall.Args)
 			if err != nil {
 				return nil, fmt.Errorf("failed to marshal function args: %w", err)
 			}
-			normalizedID := m.normalizeToolCallID(part.FunctionCall.ID)
+			normalizedId := m.normalizeToolCallId(part.FunctionCall.ID)
 			toolCalls = append(toolCalls, openai.ChatCompletionMessageToolCallUnionParam{
 				OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
-					ID: normalizedID,
+					ID: normalizedId,
 					Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
 						Name:      part.FunctionCall.Name,
 						Arguments: string(argsJSON),
@@ -419,6 +493,13 @@ func (m *openaiModel) convertResponse(resp *openai.ChatCompletion) (*model.LLMRe
 		Parts: []*genai.Part{},
 	}
 
+	// Same rationale as in buildStreamFinalResponse: read reasoning_content
+	// from the raw JSON since openai-go does not type the non-standard field
+	// used by OpenAI-compatible reasoning providers.
+	if reasoning := extractReasoningContent(choice.Message.RawJSON()); reasoning != "" {
+		content.Parts = append(content.Parts, &genai.Part{Text: reasoning, Thought: true})
+	}
+
 	if choice.Message.Content != "" {
 		content.Parts = append(content.Parts, &genai.Part{Text: choice.Message.Content})
 	}
@@ -490,6 +571,8 @@ func convertToFunctionParams(params any) shared.FunctionParameters {
 		}
 	}
 
+	// Standardise types to lowercase for JSON schema compliance
+	lowercaseTypes(m)
 	// OpenAI requires "properties" for object types
 	ensureObjectProperties(m)
 
@@ -521,6 +604,26 @@ func ensureObjectProperties(schema map[string]any) {
 	// Process array items
 	if items, ok := schema["items"].(map[string]any); ok {
 		ensureObjectProperties(items)
+	}
+}
+
+// lowercaseTypes recursively traverses a JSON schema map and lowercases all "type" fields
+// to comply with standard JSON schema validation.
+func lowercaseTypes(m map[string]any) {
+	for k, v := range m {
+		if k == "type" {
+			if s, ok := v.(string); ok {
+				m[k] = strings.ToLower(s)
+			}
+		} else if vMap, ok := v.(map[string]any); ok {
+			lowercaseTypes(vMap)
+		} else if vList, ok := v.([]any); ok {
+			for _, item := range vList {
+				if itemMap, ok := item.(map[string]any); ok {
+					lowercaseTypes(itemMap)
+				}
+			}
+		}
 	}
 }
 
@@ -568,32 +671,32 @@ func convertSchema(schema *genai.Schema) (map[string]any, error) {
 	return result, nil
 }
 
-// normalizeToolCallID shortens IDs exceeding OpenAI's 40-char limit using a hash.
+// normalizeToolCallId shortens IDs exceeding OpenAI's 40-char limit using a hash.
 // The mapping is stored to allow reverse lookup if needed.
-func (m *openaiModel) normalizeToolCallID(id string) string {
+func (m *openaiModel) normalizeToolCallId(id string) string {
 	if len(id) <= maxToolCallIdLength {
 		return id
 	}
 
 	hash := sha256.Sum256([]byte(id))
-	shortID := "tc_" + hex.EncodeToString(hash[:])[:maxToolCallIdLength-3]
+	shortId := "tc_" + hex.EncodeToString(hash[:])[:maxToolCallIdLength-3]
 
 	m.toolCallIdMux.Lock()
-	m.toolCallIdMap[shortID] = id
+	m.toolCallIdMap[shortId] = id
 	m.toolCallIdMux.Unlock()
 
-	return shortID
+	return shortId
 }
 
-// denormalizeToolCallID restores the original ID from a shortened one.
-func (m *openaiModel) denormalizeToolCallID(shortID string) string {
+// denormalizeToolCallId restores the original ID from a shortened one.
+func (m *openaiModel) denormalizeToolCallId(shortId string) string {
 	m.toolCallIdMux.RLock()
 	defer m.toolCallIdMux.RUnlock()
 
-	if original, exists := m.toolCallIdMap[shortID]; exists {
+	if original, exists := m.toolCallIdMap[shortId]; exists {
 		return original
 	}
-	return shortID
+	return shortId
 }
 
 // --- Helper functions ---
@@ -652,6 +755,15 @@ func convertInlineDataToPart(data *genai.Blob) (*openai.ChatCompletionContentPar
 }
 
 // convertUsageMetadata converts OpenAI usage stats to genai format.
+//
+// CompletionTokensDetails.ReasoningTokens is the count of hidden reasoning
+// tokens billed as output tokens by OpenAI reasoning models (o-series,
+// gpt-5.x) and by OpenAI-compatible providers exposing reasoning (DeepSeek,
+// Kimi K2/K2.6, Qwen3-Thinking). It is a documented part of the official
+// Chat Completions schema, so we always map it to genai's ThoughtsTokenCount
+// regardless of whether the provider also returns reasoning text. When the
+// provider does not emit reasoning tokens the field is zero, and genai
+// serialisation omits it via `omitempty`.
 func convertUsageMetadata(usage openai.CompletionUsage) *genai.GenerateContentResponseUsageMetadata {
 	if usage.TotalTokens == 0 {
 		return nil
@@ -660,7 +772,40 @@ func convertUsageMetadata(usage openai.CompletionUsage) *genai.GenerateContentRe
 		PromptTokenCount:     int32(usage.PromptTokens),
 		CandidatesTokenCount: int32(usage.CompletionTokens),
 		TotalTokenCount:      int32(usage.TotalTokens),
+		ThoughtsTokenCount:   int32(usage.CompletionTokensDetails.ReasoningTokens),
 	}
+}
+
+// extractReasoningContent reads the non-standard "reasoning_content" field
+// from the SDK's raw JSON envelope.
+//
+// The OpenAI Chat Completions schema does NOT include a "reasoning_content"
+// field — for OpenAI's own reasoning models (o-series, gpt-5.x) the reasoning
+// text is hidden and only the token count is reported (via
+// CompletionTokensDetails.ReasoningTokens). Reasoning *text* is only
+// available through the Responses API, which this adapter does not use.
+//
+// However, multiple OpenAI-compatible providers (DeepSeek-R1, Kimi K2/K2.6,
+// Qwen3-Thinking, etc.) extend the response with a "reasoning_content"
+// field on choices[].message and choices[].delta. openai-go does not type
+// this field but preserves it in JSON.raw, which is reachable via the
+// generated RawJSON() accessor. Parsing the raw envelope is the documented
+// way to read non-standard fields in this SDK.
+//
+// Returns "" if the field is absent, empty, or the JSON cannot be parsed —
+// callers should treat empty as "no reasoning content emitted" and skip
+// adding a thought Part.
+func extractReasoningContent(rawJSON string) string {
+	if rawJSON == "" {
+		return ""
+	}
+	var probe struct {
+		ReasoningContent string `json:"reasoning_content"`
+	}
+	if err := json.Unmarshal([]byte(rawJSON), &probe); err != nil {
+		return ""
+	}
+	return probe.ReasoningContent
 }
 
 // convertRole maps genai roles to OpenAI roles.
